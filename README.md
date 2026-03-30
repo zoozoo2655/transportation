@@ -24,4 +24,11 @@
    ```bash
    pip install -r requirements.txt
 3. 在終端機上:
+   ```bash
    streamlit run transportation.py
+⚠️ 關鍵問題解決紀錄 (Troubleshooting)
+地圖權限問題：原定使用 Power BI Bing Maps，因環境限制改採 Pydeck 座標映射技術。
+
+欄位不相容：修正 Streamlit 對經緯度欄位大小寫敏感 (Case Sensitivity) 之問題。
+
+數據連線：利用 Raw CSV URL 繞過學校無法爬取 TDX API 之限制。
