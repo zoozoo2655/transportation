@@ -1,128 +1,121 @@
+import streamlit as st
 import pandas as pd
-import os
-# 1. 指定檔案路徑 (請確保檔案在你的 Python 執行資料夾內，或者輸入絕對路徑)
-file_path = r"C:\transportation\transportation\python\112年傷亡道路交通事故資料\112年度A1交通事故資料.csv" 
 
-# 2.初始化 df 為 None，避免後續呼叫報錯
-df = None
+# ==========================================
+# 1. 頁面基礎設定 (輕量化配置)
+# ==========================================
+st.set_page_config(
+    page_title="112年交通數據儀表板",
+    page_icon="🚗",
+    layout="wide"
+)
 
-def smart_read_csv(path):
-    # 嘗試順序：1. UTF-8 (含BOM) -> 2. Big5 (繁體中文) -> 3. cp950 (Windows 繁中)
-    encodings = ['utf-8-sig', 'big5', 'cp950']
-    
-    for enc in encodings:
-        try:
-            df = pd.read_csv(path, encoding=enc)
-            print(f"✅ 成功！使用編碼：{enc}")
-            return df
-        except UnicodeDecodeError:
-            print(f"❌ {enc} 編碼讀取失敗，嘗試下一個...")
-        except Exception as e:
-            print(f"❌ 發生其他錯誤：{e}")
-            break
-    return None
+# 簡約風格 CSS
+st.markdown("""
+    <style>
+    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 5px; border: 1px solid #f0f2f6; }
+    </style>
+    """, unsafe_allow_html=True)
 
-# 3.執行讀取
-df = smart_read_csv(file_path)
+# ==========================================
+# 2. 資料載入與快取 (針對慢速網路優化)
+# ==========================================
+# 這是 GitHub Gist 的 "Raw" 連結
+DATA_URL = "https://raw.githubusercontent.com/zoozoo2655/transportation/refs/heads/main/accident_analysis_ready.csv"
 
-if df is not None:
-    print("--- 成功讀取前 5 筆資料 ---")
-    print(df.head())
-    print("\n--- 實際欄位名稱 (請複製這些名稱到你的字典裡) ---")
-    print(df.columns.tolist())
-# 4. 定義欄位對應表 (根據你印出的結果進行精確對應)
-mapping = {
-    '發生年度': 'Year',
-    '發生月份': 'Month',
-    '發生日期': 'Date',
-    '發生時間': 'Time',
-    '發生地點': 'Location',
-    '道路型態大類別名稱': 'Road_Type_Main',
-    '道路型態子類別名稱': 'Road_Type_Sub',
-    '當事者區分-類別-大類別名稱-車種': 'Vehicle_Type',
-    '當事者事故發生時年齡': 'Age',
-    '死亡受傷人數': 'Casualties',
-    '經度': 'Longitude',
-    '緯度': 'Latitude'
-}
+@st.cache_data(ttl=3600) # 快取一小時，減少重複下載
+def load_and_clean_data():
+    try:
+        # 讀取 CSV (處理編碼)
+        df = pd.read_csv(DATA_URL, encoding='utf-8-sig')
+        
+        # 清除欄位空格並統一命名
+        df.columns = df.columns.str.strip()
+        
+        # 建立欄位映射表
+        mapping = {
+            'Date': '日期',
+            'Road_Type_Main': '道路型態',
+            'Vehicle_Type': '車種',
+            'Age_Group': '年齡分組',
+            'Longitude': 'longitude',
+            'Latitude': 'latitude',
+            'Time_Slot': '時段'
+        }
+        
+        # 僅提取存在的欄位，避免 KeyError
+        present_cols = [c for c in mapping.keys() if c in df.columns]
+        clean_df = df[present_cols].rename(columns=mapping)
+        
+        # 強制轉換經緯度為數字 (這是繪圖成功的關鍵)
+        if 'latitude' in clean_df.columns and 'longitude' in clean_df.columns:
+            clean_df['latitude'] = pd.to_numeric(clean_df['latitude'], errors='coerce')
+            clean_df['longitude'] = pd.to_numeric(clean_df['longitude'], errors='coerce')
+            # 剔除無法轉換或缺失的座標點
+            clean_df = clean_df.dropna(subset=['latitude', 'longitude'])
+            
+        return clean_df
+    except Exception as e:
+        st.error(f"⚠️ 資料載入失敗: {e}")
+        return pd.DataFrame()
 
-# 5. 篩選欄位並改名 (使用 try-except 避免欄位名稱微小差異導致失敗)
-df_bi = df[list(mapping.keys())].rename(columns=mapping)
+# 執行載入
+df = load_and_clean_data()
 
-# 6. 資料清洗與特徵工程
-# (A) 處理年齡：轉換為數字並分組
-df_bi['Age'] = pd.to_numeric(df_bi['Age'], errors='coerce') # 處理非數字內容
+# ==========================================
+# 3. 側邊欄互動篩選
+# ==========================================
+st.sidebar.header("📊 篩選條件")
 
-def age_group(age):
-    if pd.isna(age): return '不詳'
-    if age < 18: return '1.未成年(<18)'
-    elif age <= 24: return '2.青少年(18-24)'
-    elif age <= 64: return '3.青壯年(25-64)'
-    else: return '4.高齡者(65+)'
+if not df.empty:
+    # 建立多選下拉選單
+    road_list = df['道路型態'].unique().tolist() if '道路型態' in df.columns else []
+    sel_roads = st.sidebar.multiselect("選擇道路類型", road_list, default=road_list)
 
-df_bi['Age_Group'] = df_bi['Age'].apply(age_group)
+    age_list = df['年齡分組'].unique().tolist() if '年齡分組' in df.columns else []
+    sel_ages = st.sidebar.multiselect("選擇年齡分組", age_list, default=age_list)
 
-# (B) 道路型態簡化 (針對你的專題重點)
-def simplify_road(road):
-    road = str(road)
-    if '交叉路口' in road or '叉路' in road: return '平面交叉路口'
-    if '單路' in road: return '單路路段'
-    if '圓環' in road: return '圓環/廣場'
-    return '其他型態'
+    # 執行過濾邏輯
+    filtered_df = df[
+        (df['道路型態'].isin(sel_roads)) & 
+        (df['年齡分組'].isin(sel_ages))
+    ]
+else:
+    filtered_df = pd.DataFrame()
 
-df_bi['Road_Pattern'] = df_bi['Road_Type_Main'].apply(simplify_road)
+# ==========================================
+# 4. 主畫面視覺化 (Dashboard)
+# ==========================================
+st.title("🚗 112年 A1 類道路交通事故分析")
+st.info("💡 提示：若地圖載入緩慢，請稍候片刻或檢查網路連線。")
 
-# (C) 座標清理：排除座標為 0 的資料
-df_bi = df_bi[(df_bi['Longitude'] > 0) & (df_bi['Latitude'] > 0)]
-# 假設 df 已經是讀取成功的 DataFrame
-if 'df' in locals() and df is not None:
-    # 1. 精選核心欄位 (對應你的專題：年齡、車種、道路型態、經緯度)
-    mapping = {
-        '發生日期': 'Date',
-        '發生時間': 'Time',
-        '道路型態大類別名稱': 'Road_Type_Main',
-        '當事者區分-類別-大類別名稱-車種': 'Vehicle_Type',
-        '當事者事故發生時年齡': 'Age',
-        '肇因研判大類別名稱-主要': 'Primary_Cause',
-        '經度': 'Longitude',
-        '緯度': 'Latitude'
-    }
-    
-    # 執行篩選與改名
-    df_final = df[list(mapping.keys())].rename(columns=mapping).copy()
+if not filtered_df.empty:
+    # 第一列：核心指標 (KPIs)
+    col_kpi1, col_kpi2, col_kpi3 = st.columns(3)
+    col_kpi1.metric("總事故件數", f"{len(filtered_df)} 件")
+    if '車種' in filtered_df.columns:
+        col_kpi2.metric("主要肇事車種", filtered_df['車種'].mode()[0])
+    if '時段' in filtered_df.columns:
+        col_kpi3.metric("高發時段", filtered_df['時段'].mode()[0])
 
-    # 2. 特徵工程 (A)：年齡層分類
-    df_final['Age'] = pd.to_numeric(df_final['Age'], errors='coerce')
-    def categorize_age(age):
-        if pd.isna(age): return '不詳'
-        if age < 18: return '1.未成年(<18)'
-        elif age <= 24: return '2.青少年(18-24)'
-        elif age <= 64: return '3.青壯年(25-64)'
-        else: return '4.高齡者(65+)'
-    df_final['Age_Group'] = df_final['Age'].apply(categorize_age)
+    st.markdown("---")
 
-    # 3. 特徵工程 (B)：時段分類 (時段是交通分析的關鍵)
-    # 原始格式通常是 140800.0 (14:08:00)
-    df_final['Hour'] = (df_final['Time'] // 10000).fillna(0).astype(int)
-    def categorize_time(hour):
-        if 6 <= hour < 9: return '早尖峰(06-09)'
-        elif 9 <= hour < 17: return '日間(09-17)'
-        elif 17 <= hour < 20: return '晚尖峰(17-20)'
-        else: return '夜間/深夜(20-06)'
-    df_final['Time_Slot'] = df_final['Hour'].apply(categorize_time)
+    # 第二列：地圖展示 (改用最輕量的 st.map)
+    st.subheader("📍 事故地理位置分佈")
+    # st.map 是 Streamlit 最穩定的地圖組件，不需額外 JS 庫
+    st.map(filtered_df[['latitude', 'longitude']], use_container_width=True)
 
-    # 4. 特徵工程 (C)：道路型態群組化
-    def group_road(road):
-        road = str(road)
-        if '交叉路口' in road: return '路口區域'
-        if '單路' in road: return '直線路段'
-        if '圓環' in road or '廣場' in road: return '圓環/特殊路段'
-        return '其他'
-    df_final['Road_Category'] = df_final['Road_Type_Main'].apply(group_road)
+    st.markdown("---")
 
-    # 5. 導出 CSV (utf-8-sig 確保 Excel 與 Power BI 不亂碼)
-    df_final.to_csv('accident_analysis_ready.csv', index=False, encoding='utf-8-sig')
-    
-    print("✅ 恭喜！專題專用資料已產出。")
-    print(f"總筆數：{len(df_final)}")
-    print(df_final[['Age_Group', 'Time_Slot', 'Road_Category']].head())
+    # 第三列：統計圖表
+    c1, c2 = st.columns(2)
+    with c1:
+        if '車種' in filtered_df.columns:
+            st.subheader("🛵 車種分佈")
+            st.bar_chart(filtered_df['車種'].value_counts())
+    with c2:
+        if '年齡分組' in filtered_df.columns:
+            st.subheader("👥 年齡層比例")
+            # 必須計算各組數量的次數 (value_counts)，否則折線圖會亂掉
+            age_counts = filtered_df['年齡分組'].value_counts()
+            st.line_chart(age_counts) # 確保有括號，且裡面有放數據
