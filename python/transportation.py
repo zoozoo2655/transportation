@@ -10,10 +10,22 @@ st.set_page_config(
     layout="wide"
 )
 
-# 簡約風格 CSS
+# 修改後的 CSS：同時固定背景色與文字顏色
 st.markdown("""
     <style>
-    .stMetric { background-color: #ffffff; padding: 10px; border-radius: 5px; border: 1px solid #f0f2f6; }
+    /* 強制設定 Metric 卡片的樣式 */
+    [data-testid="stMetric"] {
+        background-color: #ffffff !important; /* 強制背景為白 */
+        padding: 15px !important;
+        border-radius: 10px !important;
+        border: 1px solid #e0e0e0 !important;
+        box-shadow: 0 2px 4px rgba(0,0,0,0.05) !important;
+    }
+    /* 強制設定 Metric 內的文字顏色為深灰色，避免深色模式下變白字 */
+    [data-testid="stMetric"] label, 
+    [data-testid="stMetric"] div {
+        color: #31333F !important; 
+    }
     </style>
     """, unsafe_allow_html=True)
 
