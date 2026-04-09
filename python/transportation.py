@@ -33,7 +33,7 @@ st.markdown("""
 # 2. 資料載入與快取 (針對慢速網路優化)
 # ==========================================
 # 這是 GitHub Gist 的 "Raw" 連結
-DATA_URL = "https://raw.githubusercontent.com/zoozoo2655/transportation/refs/heads/main/accident_analysis_ready.csv"
+DATA_URL = "https://raw.githubusercontent.com/zoozoo2655/transportation/refs/heads/main/python/accident_analysis_ready.csv"
 
 @st.cache_data(ttl=3600) # 快取一小時，減少重複下載
 def load_and_clean_data():
